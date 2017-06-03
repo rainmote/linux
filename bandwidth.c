@@ -8,6 +8,8 @@
 #include <sys/socket.h>
 #include <net/if.h>
 #include <errno.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #ifndef SIOCETHTOOL
 #define SIOCETHTOOL             0x8946
@@ -17,11 +19,15 @@
 #define ETHTOOL_GLINKSETTINGS   0x0000004c
 
 #ifndef IFNAMSIZE
-#define IFNAMSIZE   16
+#define IFNAMSIZE               16
 #endif
 
 #ifndef SCHAR_MAX
-#define SCHAR_MAX   127
+#define SCHAR_MAX               127
+#endif
+
+#ifndef IP_ADDR_LEN
+#define IP_ADDR_LEN             16
 #endif
 
 struct ethtool_cmd {
@@ -82,11 +88,11 @@ int do_ioctl_glinksettings(int sockfd,
     ecmd.req->cmd = ETHTOOL_GLINKSETTINGS;
 
     ifr->ifr_data = (caddr_t)&ecmd;
-    int ret = ioctl(sockfd, SIOCETHTOOL, &ifr);
+    int ret = ioctl(sockfd, SIOCETHTOOL, ifr);
     if (ret < 0)
     {
         printf("ioctl error: %s\n", strerror(errno));
-		return -1;
+        return -1;
     }
     printf("Speed: %d", ecmd.req->speed);
 }
@@ -100,7 +106,7 @@ int do_ioctl_gset(int sockfd,
     ecmd.cmd = ETHTOOL_GSET;
 
     ifr->ifr_data = (caddr_t)&ecmd;
-    int ret = ioctl(sockfd, SIOCETHTOOL, &ifr);
+    int ret = ioctl(sockfd, SIOCETHTOOL, ifr);
     if (ret < 0)
     {
         printf("ioctl error: %s\n", strerror(errno));
@@ -126,11 +132,26 @@ int GetDeviceBandwidth(int sockfd, char *dev)
     struct ifreq ifr;
     struct ethtool_link_settings settings;
     strncpy(ifr.ifr_name, dev, IFNAMSIZE - 1);
-    printf("function dev: %s\n", ifr.ifr_name);
 
     do_ioctl_gset(sockfd, &ifr, &settings);
     do_ioctl_glinksettings(sockfd, &ifr, &settings);
 
+    return 0;
+}
+
+int GetDeviceAddr(int sockfd, char *dev, char *ip)
+{
+    struct ifreq ifr;
+    strncpy(ifr.ifr_name, dev, IFNAMSIZE - 1);
+    if (ioctl(sockfd, SIOCGIFADDR, &ifr) < 0)
+    {
+        printf("ioctl error: %s\n", strerror(errno));
+        return -1;
+    }
+    struct sockaddr_in *addr = (struct sockaddr_in *)&(ifr.ifr_addr);
+    char *sin_addr = inet_ntoa(addr->sin_addr);
+    uint len = strlen(sin_addr);
+    strncpy(ip, sin_addr, len > IP_ADDR_LEN ? IP_ADDR_LEN : len);
     return 0;
 }
 
@@ -162,7 +183,10 @@ int main()
     int len = ifconf.ifc_len / sizeof(struct ifreq);
     for (int i = 0; i < len; i++)
     {
-        printf("dev: %s\n", ifr->ifr_name);
+        char ip[IP_ADDR_LEN] = {0};
+        GetDeviceAddr(sockfd, ifr->ifr_name, ip);
+        printf("dev: %-12s\taddr: %s\n", ifr->ifr_name, ip);
+
         GetDeviceBandwidth(sockfd, ifr->ifr_name);
 
         ifr++;
